@@ -1,1 +1,141 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hit/Crit Calculator</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .row { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+    label { display:block; font-size:12px; opacity:0.8; }
+    input { width:90px; padding:6px; font-size:14px; }
+    button { padding:8px 12px; font-size:14px; cursor:pointer; }
+    #summary { margin: 12px 0; font-weight: 600; white-space: pre-line; }
+    #plot { width: 100%; max-width: 980px; height: 520px; }
+  </style>
+</head>
+<body>
+  <h2>Exact Hit / Crit Calculator</h2>
+  <div class="row">
+    <div><label>ATK</label><input id="atk" type="number" value="0"></div>
+    <div><label>DEF</label><input id="def" type="number" value="0"></div>
+    <button id="run" disabled>Compute</button>
+  </div>
+  <div id="summary">Loading Python runtime…</div>
+  <div id="plot"></div>
+
+<script>
+let pyodide;
+
+async function init() {
+  pyodide = await loadPyodide();
+  document.getElementById("run").disabled = false;
+  document.getElementById("summary").textContent = "Ready.";
+  await computeAndPlot();
+}
+
+async function computeAndPlot() {
+  const ATK = parseInt(document.getElementById("atk").value || "0", 10);
+  const DEF = parseInt(document.getElementById("def").value || "0", 10);
+
+  const code = `
+from collections import Counter
+import json
+
+def exact_dist_2d10_plus_U():
+    # U = d2 * (d2 + 2 - d6)
+    c = Counter()
+    total = 0
+    for d10a in range(1, 11):
+        for d10b in range(1, 11):
+            base = d10a + d10b
+            for d2a in range(1, 3):
+                for d2b in range(1, 3):
+                    for d6 in range(1, 7):
+                        U = d2a * (d2b + 2 - d6)
+                        c[base + U] += 1
+                        total += 1
+    return c, total
+
+def shifted_dist(ATK, DEF):
+    base, total = exact_dist_2d10_plus_U()
+    shift = ATK - DEF
+    out = Counter()
+    for v, f in base.items():
+        out[v + shift] += f
+    return out, total
+
+dist, total = shifted_dist(${ATK}, ${DEF})
+xs = sorted(dist.keys())
+ys = [dist[x]/total*100 for x in xs]
+
+success_freq = sum(f for x,f in dist.items() if x >= 0)
+crit_freq = sum(f for x,f in dist.items() if x >= 17)
+
+payload = {
+  "xs": xs,
+  "ys": ys,
+  "success_freq": success_freq,
+  "crit_freq": crit_freq,
+  "total": total
+}
+json.dumps(payload)
+  `;
+
+  const payloadJSON = await pyodide.runPythonAsync(code);
+  const payload = JSON.parse(payloadJSON);
+
+  const xs = payload.xs;
+  const ys = payload.ys;
+
+  // Color per bin: fail (<0), crit (>=17), else success
+  const colors = xs.map(x => (x < 0 ? "red" : (x >= 17 ? "cyan" : "green")));
+
+  const successRate = payload.success_freq / payload.total * 100;
+  const critRate = payload.crit_freq / payload.total * 100;
+  const critOnHit = payload.success_freq > 0 ? (payload.crit_freq / payload.success_freq * 100) : 0;
+
+  document.getElementById("summary").textContent =
+    `Success: ${successRate.toFixed(3)}% (${payload.success_freq}/${payload.total})\n` +
+    `Crit:    ${critRate.toFixed(3)}% (${payload.crit_freq}/${payload.total})\n` +
+    `Crit|Hit:${critOnHit.toFixed(3)}% (${payload.crit_freq}/${payload.success_freq})`;
+
+  const trace = {
+    x: xs,
+    y: ys,
+    type: "bar",
+    marker: { color: colors, line: { color: "black", width: 1 } },
+    hovertemplate: "Roll=%{x}<br>%{y:.3f}%<extra></extra>"
+  };
+
+  const layout = {
+    title: `Exact Distribution: 2d10 + ATK(${ATK}) - DEF(${DEF}) + U`,
+    xaxis: { title: "Roll", dtick: 2 },
+    yaxis: { title: "Frequency (%)", rangemode: "tozero" },
+    shapes: [
+      // Threshold lines
+      { type:"line", x0:-0.5, x1:-0.5, y0:0, y1:1, xref:"x", yref:"paper",
+        line:{color:"black", width:2, dash:"dash"} },
+      { type:"line", x0:16.5, x1:16.5, y0:0, y1:1, xref:"x", yref:"paper",
+        line:{color:"black", width:2, dash:"dash"} },
+      // Failure shade
+      { type:"rect", x0:xs[0]-0.5, x1:-0.5, y0:0, y1:1, xref:"x", yref:"paper",
+        fillcolor:"rgba(255,0,0,0.15)", line:{width:0} },
+      // Crit shade
+      { type:"rect", x0:16.5, x1:xs[xs.length-1]+0.5, y0:0, y1:1, xref:"x", yref:"paper",
+        fillcolor:"rgba(0,255,255,0.15)", line:{width:0} }
+    ],
+    margin: { t: 60, r: 20, b: 60, l: 60 }
+  };
+
+  Plotly.newPlot("plot", [trace], layout, {displayModeBar: false});
+}
+
+document.getElementById("run").addEventListener("click", computeAndPlot);
+init();
+</script>
+</body>
+</html>
 
