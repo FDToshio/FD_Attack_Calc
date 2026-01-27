@@ -52,7 +52,7 @@ def exact_dist_2d10_plus_U():
         for d10b in range(1, 11):
             base = d10a + d10b
             for d6 in range(1, 7):
-                U = d6 - 3
+                U = d6 - 4
                 c[base + U] += 1
                 total += 1
     return c, total
@@ -99,7 +99,7 @@ json.dumps(payload)
     `Success: ${successRate.toFixed(3)}% (${payload.success_freq}/${payload.total})\n` +
     `Crit:    ${critRate.toFixed(3)}% (${payload.crit_freq}/${payload.total})\n` +
     `Crit|Hit:${critOnHit.toFixed(3)}% (${payload.crit_freq}/${payload.success_freq})\n` +
-    `U = d6 - 3`;
+    `U = d6 - 4`;
 
   const trace = {
     x: xs,
