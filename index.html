@@ -44,24 +44,26 @@ async function computeAndPlot() {
 from collections import Counter
 import json
 
-T = 6
-CRIT_T = T + 14  # 20
+# New rules (no U):
+# A = 2d10 + ATK
+# Miss if A < DEF + 7
+# Hit  if A >= DEF + 7
+# Crit if A >= 20  (absolute threshold)
 
-def exact_dist_2d10_plus_U():
-    # U = d6 - 4  (range -3..+2)
+T = 7
+CRIT_T = 20
+
+def exact_dist_2d10():
     c = Counter()
     total = 0
     for d10a in range(1, 11):
         for d10b in range(1, 11):
-            base = d10a + d10b
-            for d6 in range(1, 7):
-                U = d6 - 4
-                c[base + U] += 1
-                total += 1
+            c[d10a + d10b] += 1
+            total += 1
     return c, total
 
 def shifted_dist(ATK, DEF):
-    base, total = exact_dist_2d10_plus_U()
+    base, total = exact_dist_2d10()
     shift = ATK - DEF
     out = Counter()
     for v, f in base.items():
@@ -72,8 +74,13 @@ dist, total = shifted_dist(${ATK}, ${DEF})
 xs = sorted(dist.keys())
 ys = [dist[x]/total*100 for x in xs]
 
+# Hit if A >= DEF + 7  -> (2d10 + ATK - DEF) >= 7
 success_freq = sum(f for x,f in dist.items() if x >= T)
-crit_freq = sum(f for x,f in dist.items() if x >= CRIT_T)
+
+# Crit if A >= 20 -> (2d10 + ATK - DEF) >= (20 - DEF)
+# Since dist is already shifted by (ATK - DEF), the crit threshold depends on DEF:
+crit_threshold_shifted = CRIT_T - ${DEF}
+crit_freq = sum(f for x,f in dist.items() if x >= crit_threshold_shifted)
 
 payload = {
   "xs": xs,
@@ -82,7 +89,8 @@ payload = {
   "crit_freq": crit_freq,
   "total": total,
   "T": T,
-  "CRIT_T": CRIT_T
+  "CRIT_T": CRIT_T,
+  "crit_threshold_shifted": crit_threshold_shifted
 }
 json.dumps(payload)
   `;
@@ -94,11 +102,13 @@ json.dumps(payload)
   const ys = payload.ys;
   const T = payload.T;
   const CRIT_T = payload.CRIT_T;
+  const critThresholdShifted = payload.crit_threshold_shifted;
 
-  // Color per bin: fail (<T), crit (>=CRIT_T), else success
+  // Color per bin:
+  // fail (<T), crit (>=critThresholdShifted), else success
   const colors = xs.map(x =>
     (x < T) ? "red" :
-    (x >= CRIT_T) ? "cyan" :
+    (x >= critThresholdShifted) ? "cyan" :
     "green"
   );
 
@@ -107,36 +117,44 @@ json.dumps(payload)
   const critOnHit = payload.success_freq > 0 ? (payload.crit_freq / payload.success_freq * 100) : 0;
 
   document.getElementById("summary").textContent =
+    `Rules: A = 2d10 + ATK; Hit if A ≥ DEF + 7; Crit if A ≥ 20\n` +
     `Success: ${successRate.toFixed(3)}% (${payload.success_freq}/${payload.total})\n` +
     `Crit:    ${critRate.toFixed(3)}% (${payload.crit_freq}/${payload.total})\n` +
     `Crit|Hit:${critOnHit.toFixed(3)}% (${payload.crit_freq}/${payload.success_freq})\n` +
-    `U = d6 - 4 | Hit ≥ ${T} | Crit ≥ ${CRIT_T}`;
+    `Hit threshold (shifted): ≥ ${T}\n` +
+    `Crit threshold (absolute): A ≥ ${CRIT_T}  (shifted threshold: ≥ ${critThresholdShifted})`;
 
   const trace = {
     x: xs,
     y: ys,
     type: "bar",
     marker: { color: colors, line: { color: "black", width: 1 } },
-    hovertemplate: "Roll=%{x}<br>%{y:.3f}%<extra></extra>"
+    hovertemplate: "A-DEF Roll=%{x}<br>%{y:.3f}%<extra></extra>"
   };
 
+  // Vertical lines should be drawn at boundaries between integers:
+  const hitLineX = T - 0.5;
+  const critLineX = critThresholdShifted - 0.5;
+
   const layout = {
-    title: `Exact Distribution: 2d10 + ATK(${ATK}) - DEF(${DEF}) + U (U=d6-4, T=${T})`,
-    xaxis: { title: "Roll", dtick: 2 },
+    title: `Exact Distribution: 2d10 + ATK(${ATK}) - DEF(${DEF})`,
+    xaxis: { title: "A − DEF (i.e., 2d10 + ATK − DEF)", dtick: 1 },
     yaxis: { title: "Frequency (%)", rangemode: "tozero" },
     shapes: [
-      // Threshold lines at boundaries between integers
-      { type:"line", x0:T-0.5, x1:T-0.5, y0:0, y1:1, xref:"x", yref:"paper",
+      // Hit threshold line
+      { type:"line", x0:hitLineX, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
         line:{color:"black", width:2, dash:"dash"} },
-      { type:"line", x0:CRIT_T-0.5, x1:CRIT_T-0.5, y0:0, y1:1, xref:"x", yref:"paper",
+
+      // Crit threshold line
+      { type:"line", x0:critLineX, x1:critLineX, y0:0, y1:1, xref:"x", yref:"paper",
         line:{color:"black", width:2, dash:"dash"} },
 
       // Failure shade (x < T)
-      { type:"rect", x0:xs[0]-0.5, x1:T-0.5, y0:0, y1:1, xref:"x", yref:"paper",
+      { type:"rect", x0:xs[0]-0.5, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
         fillcolor:"rgba(255,0,0,0.15)", line:{width:0} },
 
-      // Crit shade (x >= CRIT_T)
-      { type:"rect", x0:CRIT_T-0.5, x1:xs[xs.length-1]+0.5, y0:0, y1:1, xref:"x", yref:"paper",
+      // Crit shade (x >= critThresholdShifted)
+      { type:"rect", x0:critLineX, x1:xs[xs.length-1]+0.5, y0:0, y1:1, xref:"x", yref:"paper",
         fillcolor:"rgba(0,255,255,0.15)", line:{width:0} }
     ],
     margin: { t: 60, r: 20, b: 60, l: 60 }
