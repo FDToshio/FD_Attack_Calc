@@ -44,43 +44,38 @@ async function computeAndPlot() {
 from collections import Counter
 import json
 
-# New rules (no U):
+# Final rules (no U):
 # A = 2d10 + ATK
-# Miss if A < DEF + 7
-# Hit  if A >= DEF + 7
-# Crit if A >= 20  (absolute threshold)
+# Hit if A >= DEF + 7  <=>  (A - DEF) >= 7
+# Crit if A >= 20 (absolute; does NOT depend on DEF)
 
-T = 7
-CRIT_T = 20
+HIT_T = 7
+CRIT_A = 20
 
-def exact_dist_2d10():
-    c = Counter()
-    total = 0
-    for d10a in range(1, 11):
-        for d10b in range(1, 11):
-            c[d10a + d10b] += 1
-            total += 1
-    return c, total
+# Build shifted distribution for plotting: X = (2d10 + ATK - DEF)
+dist = Counter()
+total = 0
 
-def shifted_dist(ATK, DEF):
-    base, total = exact_dist_2d10()
-    shift = ATK - DEF
-    out = Counter()
-    for v, f in base.items():
-        out[v + shift] += f
-    return out, total
+# Compute hit/crit frequencies using the correct variables:
+# - Hit check uses X = A - DEF
+# - Crit check uses A (absolute)
+success_freq = 0
+crit_freq = 0
 
-dist, total = shifted_dist(${ATK}, ${DEF})
+for d10a in range(1, 11):
+    for d10b in range(1, 11):
+        A = d10a + d10b + ${ATK}
+        X = A - ${DEF}
+        dist[X] += 1
+        total += 1
+
+        if X >= HIT_T:
+            success_freq += 1
+            if A >= CRIT_A:
+                crit_freq += 1
+
 xs = sorted(dist.keys())
 ys = [dist[x]/total*100 for x in xs]
-
-# Hit if A >= DEF + 7  -> (2d10 + ATK - DEF) >= 7
-success_freq = sum(f for x,f in dist.items() if x >= T)
-
-# Crit if A >= 20 -> (2d10 + ATK - DEF) >= (20)
-# Since dist is already shifted by (ATK - DEF), the crit threshold depends on DEF:
-crit_threshold_shifted = CRIT_T - 0
-crit_freq = sum(f for x,f in dist.items() if x >= crit_threshold_shifted)
 
 payload = {
   "xs": xs,
@@ -88,9 +83,8 @@ payload = {
   "success_freq": success_freq,
   "crit_freq": crit_freq,
   "total": total,
-  "T": T,
-  "CRIT_T": CRIT_T,
-  "crit_threshold_shifted": crit_threshold_shifted
+  "HIT_T": HIT_T,
+  "CRIT_A": CRIT_A
 }
 json.dumps(payload)
   `;
@@ -100,15 +94,18 @@ json.dumps(payload)
 
   const xs = payload.xs;
   const ys = payload.ys;
-  const T = payload.T;
-  const CRIT_T = payload.CRIT_T;
-  const critThresholdShifted = payload.crit_threshold_shifted;
+  const HIT_T = payload.HIT_T;     // threshold on X = A - DEF
+  const CRIT_A = payload.CRIT_A;   // absolute crit threshold on A
 
-  // Color per bin:
-  // fail (<T), crit (>=critThresholdShifted), else success
+  // For coloring/shading on the plotted x-axis (which is X = A - DEF),
+  // the crit region starts at X >= (CRIT_A - DEF) because A = X + DEF.
+  const critThresholdOnX = CRIT_A - DEF;
+
+  // Color per bin on X-axis:
+  // fail (<HIT_T), crit (>=critThresholdOnX), else success
   const colors = xs.map(x =>
-    (x < T) ? "red" :
-    (x >= critThresholdShifted) ? "cyan" :
+    (x < HIT_T) ? "red" :
+    (x >= critThresholdOnX) ? "cyan" :
     "green"
   );
 
@@ -117,43 +114,43 @@ json.dumps(payload)
   const critOnHit = payload.success_freq > 0 ? (payload.crit_freq / payload.success_freq * 100) : 0;
 
   document.getElementById("summary").textContent =
-    `Rules: A = 2d10 + ATK; Hit if A ≥ DEF + 7; Crit if A ≥ 20\n` +
+    `Rules: A = 2d10 + ATK; Hit if A ≥ DEF + 7; Crit if A ≥ 20 (crit ignores DEF)\n` +
     `Success: ${successRate.toFixed(3)}% (${payload.success_freq}/${payload.total})\n` +
     `Crit:    ${critRate.toFixed(3)}% (${payload.crit_freq}/${payload.total})\n` +
     `Crit|Hit:${critOnHit.toFixed(3)}% (${payload.crit_freq}/${payload.success_freq})\n` +
-    `Hit threshold (shifted): ≥ ${T}\n` +
-    `Crit threshold (absolute): A ≥ ${CRIT_T}  (shifted threshold: ≥ ${critThresholdShifted})`;
+    `Plotted axis: X = A − DEF = 2d10 + ATK − DEF\n` +
+    `Hit threshold on X: ≥ ${HIT_T}\n` +
+    `Crit condition: A ≥ ${CRIT_A} (equivalently on X: ≥ ${critThresholdOnX})`;
 
   const trace = {
     x: xs,
     y: ys,
     type: "bar",
     marker: { color: colors, line: { color: "black", width: 1 } },
-    hovertemplate: "A-DEF Roll=%{x}<br>%{y:.3f}%<extra></extra>"
+    hovertemplate: "X=A−DEF=%{x}<br>%{y:.3f}%<extra></extra>"
   };
 
-  // Vertical lines should be drawn at boundaries between integers:
-  const hitLineX = T - 0.5;
-  const critLineX = critThresholdShifted - 0.5;
+  const hitLineX = HIT_T - 0.5;
+  const critLineX = critThresholdOnX - 0.5;
 
   const layout = {
-    title: `Exact Distribution: 2d10 + ATK(${ATK}) - DEF(${DEF})`,
-    xaxis: { title: "A − DEF (i.e., 2d10 + ATK − DEF)", dtick: 1 },
+    title: `Exact Distribution: X = 2d10 + ATK(${ATK}) - DEF(${DEF})`,
+    xaxis: { title: "X = A − DEF", dtick: 1 },
     yaxis: { title: "Frequency (%)", rangemode: "tozero" },
     shapes: [
       // Hit threshold line
       { type:"line", x0:hitLineX, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
         line:{color:"black", width:2, dash:"dash"} },
 
-      // Crit threshold line
+      // Crit threshold line on X-axis (corresponding to A>=20)
       { type:"line", x0:critLineX, x1:critLineX, y0:0, y1:1, xref:"x", yref:"paper",
         line:{color:"black", width:2, dash:"dash"} },
 
-      // Failure shade (x < T)
+      // Failure shade (X < HIT_T)
       { type:"rect", x0:xs[0]-0.5, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
         fillcolor:"rgba(255,0,0,0.15)", line:{width:0} },
 
-      // Crit shade (x >= critThresholdShifted)
+      // Crit shade (A >= 20 => X >= CRIT_A - DEF)
       { type:"rect", x0:critLineX, x1:xs[xs.length-1]+0.5, y0:0, y1:1, xref:"x", yref:"paper",
         fillcolor:"rgba(0,255,255,0.15)", line:{width:0} }
     ],
