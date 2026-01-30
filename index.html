@@ -61,7 +61,7 @@ crit_freq = 0
 # Determine whether crit is even possible given ATK and DEF:
 # max A = 20 + ATK - DEF
 max_A = 20 + ${ATK} - ${DEF}
-has_crit = max_A >= CRIT_A
+has_crit = max_A >= 20
 
 for d10a in range(1, 11):
     for d10b in range(1, 11):
@@ -101,7 +101,7 @@ json.dumps(payload)
   const hasCrit = !!payload.has_crit;
 
   // Plotted axis: X = A - DEF. Crit condition A>=20 corresponds to:
-  // X >= 20 - DEF
+  // X >= 20
   const critThresholdOnX = CRIT_A - DEF;
 
   // Color per bin on X-axis:
