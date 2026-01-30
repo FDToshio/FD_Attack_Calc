@@ -52,15 +52,16 @@ import json
 HIT_T = 7
 CRIT_A = 20
 
-# Build shifted distribution for plotting: X = (2d10 + ATK - DEF)
 dist = Counter()
 total = 0
 
-# Compute hit/crit frequencies using the correct variables:
-# - Hit check uses X = A - DEF
-# - Crit check uses A (absolute)
 success_freq = 0
 crit_freq = 0
+
+# Determine whether crit is even possible given ATK:
+# max A = 20 + ATK
+max_A = 20 + ${ATK}
+has_crit = max_A >= CRIT_A
 
 for d10a in range(1, 11):
     for d10b in range(1, 11):
@@ -84,7 +85,8 @@ payload = {
   "crit_freq": crit_freq,
   "total": total,
   "HIT_T": HIT_T,
-  "CRIT_A": CRIT_A
+  "CRIT_A": CRIT_A,
+  "has_crit": has_crit
 }
 json.dumps(payload)
   `;
@@ -94,24 +96,29 @@ json.dumps(payload)
 
   const xs = payload.xs;
   const ys = payload.ys;
-  const HIT_T = payload.HIT_T;     // threshold on X = A - DEF
-  const CRIT_A = payload.CRIT_A;   // absolute crit threshold on A
+  const HIT_T = payload.HIT_T;
+  const CRIT_A = payload.CRIT_A;
+  const hasCrit = !!payload.has_crit;
 
-  // For coloring/shading on the plotted x-axis (which is X = A - DEF),
-  // the crit region starts at X >= (CRIT_A - DEF) because A = X + DEF.
+  // Plotted axis: X = A - DEF. Crit condition A>=20 corresponds to:
+  // X >= 20 - DEF
   const critThresholdOnX = CRIT_A - DEF;
 
   // Color per bin on X-axis:
-  // fail (<HIT_T), crit (>=critThresholdOnX), else success
-  const colors = xs.map(x =>
-    (x < HIT_T) ? "red" :
-    (x >= critThresholdOnX) ? "cyan" :
-    "green"
-  );
+  // fail (<HIT_T), crit (>=critThresholdOnX AND crit possible), else success
+  const colors = xs.map(x => {
+    if (x < HIT_T) return "red";
+    if (hasCrit && x >= critThresholdOnX) return "cyan";
+    return "green";
+  });
 
   const successRate = payload.success_freq / payload.total * 100;
   const critRate = payload.crit_freq / payload.total * 100;
   const critOnHit = payload.success_freq > 0 ? (payload.crit_freq / payload.success_freq * 100) : 0;
+
+  const critNote = hasCrit
+    ? `Crit condition: A ≥ ${CRIT_A} (equivalently on X: ≥ ${critThresholdOnX})`
+    : `Crit condition: A ≥ ${CRIT_A} (IMPOSSIBLE at this ATK)`;
 
   document.getElementById("summary").textContent =
     `Rules: A = 2d10 + ATK; Hit if A ≥ DEF + 7; Crit if A ≥ 20 (crit ignores DEF)\n` +
@@ -120,7 +127,7 @@ json.dumps(payload)
     `Crit|Hit:${critOnHit.toFixed(3)}% (${payload.crit_freq}/${payload.success_freq})\n` +
     `Plotted axis: X = A − DEF = 2d10 + ATK − DEF\n` +
     `Hit threshold on X: ≥ ${HIT_T}\n` +
-    `Crit condition: A ≥ ${CRIT_A} (equivalently on X: ≥ ${critThresholdOnX})`;
+    `${critNote}`;
 
   const trace = {
     x: xs,
@@ -133,31 +140,54 @@ json.dumps(payload)
   const hitLineX = HIT_T - 0.5;
   const critLineX = critThresholdOnX - 0.5;
 
+  // Always include hit line + miss shading; include crit line/shading only if crit possible
+  const shapes = [
+    // Hit threshold line
+    {
+      type: "line",
+      x0: hitLineX, x1: hitLineX,
+      y0: 0, y1: 1, xref: "x", yref: "paper",
+      line: { color: "black", width: 2, dash: "dash" }
+    },
+    // Miss region shade (X < HIT_T)
+    {
+      type: "rect",
+      x0: xs[0] - 0.5, x1: hitLineX,
+      y0: 0, y1: 1, xref: "x", yref: "paper",
+      fillcolor: "rgba(255,0,0,0.15)",
+      line: { width: 0 }
+    }
+  ];
+
+  if (hasCrit) {
+    shapes.push(
+      // Crit threshold line on X-axis (corresponding to A>=20)
+      {
+        type: "line",
+        x0: critLineX, x1: critLineX,
+        y0: 0, y1: 1, xref: "x", yref: "paper",
+        line: { color: "black", width: 2, dash: "dash" }
+      },
+      // Crit region shade (A>=20 => X >= 20-DEF)
+      {
+        type: "rect",
+        x0: critLineX, x1: xs[xs.length - 1] + 0.5,
+        y0: 0, y1: 1, xref: "x", yref: "paper",
+        fillcolor: "rgba(0,255,255,0.15)",
+        line: { width: 0 }
+      }
+    );
+  }
+
   const layout = {
     title: `Exact Distribution: X = 2d10 + ATK(${ATK}) - DEF(${DEF})`,
     xaxis: { title: "X = A − DEF", dtick: 1 },
     yaxis: { title: "Frequency (%)", rangemode: "tozero" },
-    shapes: [
-      // Hit threshold line
-      { type:"line", x0:hitLineX, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
-        line:{color:"black", width:2, dash:"dash"} },
-
-      // Crit threshold line on X-axis (corresponding to A>=20)
-      { type:"line", x0:critLineX, x1:critLineX, y0:0, y1:1, xref:"x", yref:"paper",
-        line:{color:"black", width:2, dash:"dash"} },
-
-      // Failure shade (X < HIT_T)
-      { type:"rect", x0:xs[0]-0.5, x1:hitLineX, y0:0, y1:1, xref:"x", yref:"paper",
-        fillcolor:"rgba(255,0,0,0.15)", line:{width:0} },
-
-      // Crit shade (A >= 20 => X >= CRIT_A - DEF)
-      { type:"rect", x0:critLineX, x1:xs[xs.length-1]+0.5, y0:0, y1:1, xref:"x", yref:"paper",
-        fillcolor:"rgba(0,255,255,0.15)", line:{width:0} }
-    ],
+    shapes: shapes,
     margin: { t: 60, r: 20, b: 60, l: 60 }
   };
 
-  Plotly.newPlot("plot", [trace], layout, {displayModeBar: false});
+  Plotly.newPlot("plot", [trace], layout, { displayModeBar: false });
 }
 
 document.getElementById("run").addEventListener("click", computeAndPlot);
