@@ -58,9 +58,9 @@ total = 0
 success_freq = 0
 crit_freq = 0
 
-# Determine whether crit is even possible given ATK:
-# max A = 20 + ATK
-max_A = 20 + ${ATK}
+# Determine whether crit is even possible given ATK and DEF:
+# max A = 20 + ATK - DEF
+max_A = 20 + ${ATK} - ${DEF}
 has_crit = max_A >= CRIT_A
 
 for d10a in range(1, 11):
