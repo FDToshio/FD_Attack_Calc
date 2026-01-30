@@ -79,7 +79,7 @@ success_freq = sum(f for x,f in dist.items() if x >= T)
 
 # Crit if A >= 20 -> (2d10 + ATK - DEF) >= (20)
 # Since dist is already shifted by (ATK - DEF), the crit threshold depends on DEF:
-crit_threshold_shifted = CRIT_T - ${DEF}
+crit_threshold_shifted = CRIT_T - 0
 crit_freq = sum(f for x,f in dist.items() if x >= crit_threshold_shifted)
 
 payload = {
